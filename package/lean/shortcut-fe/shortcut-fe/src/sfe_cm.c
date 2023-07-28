@@ -1127,6 +1127,7 @@ static int __init sfe_cm_init(void)
 	 */
 	sfe_ipv4_register_sync_rule_callback(sfe_cm_sync_rule);
 	sfe_ipv6_register_sync_rule_callback(sfe_cm_sync_rule);
+	printk(KERN_ALERT "sfe-cm: registered\n");
 	return 0;
 
 #ifdef CONFIG_NF_CONNTRACK_EVENTS
