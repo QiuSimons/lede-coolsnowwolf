@@ -31,6 +31,7 @@
 #include <net/netfilter/nf_conntrack_core.h>
 #include <linux/netfilter/xt_dscp.h>
 #include <net/genetlink.h>
+#include <net/pkt_sched.h>
 #include <linux/spinlock.h>
 #include <linux/if_bridge.h>
 #include <linux/hashtable.h>
@@ -196,7 +197,7 @@ static atomic_t done_fail_msgs = ATOMIC_INIT(0);
  * 	only implement ingress for now, because for egress we
  * 	want to have the bridge devices qdiscs be used.
  */
-static bool skip_to_bridge_ingress;
+static bool skip_to_bridge_ingress = 1;
 
 /*
  * fast_classifier_incr_exceptions()
@@ -244,6 +245,16 @@ int fast_classifier_recv(struct sk_buff *skb)
 		}
 		dev = master_dev;
 	}
+
+#ifdef CONFIG_NET_CLS_ACT
+	/*
+	 * If ingress Qdisc configured, and packet not processed by ingress Qdisc yet
+	 * We cannot accelerate this packet.
+	 */
+	if (dev->ingress_queue && !skb_skip_tc_classify(skb)) {
+		goto rx_exit;
+	}
+#endif
 
 	/*
 	 * We're only interested in IPv4 and IPv6 packets.
@@ -810,7 +821,7 @@ static int fast_classifier_nl_genl_msg_DUMP(struct sk_buff *skb,
 }
 
 /* auto offload connection once we have this many packets*/
-static int offload_at_pkts = 128;
+static int offload_at_pkts = 4;
 
 /*
  * fast_classifier_post_routing()
@@ -1128,7 +1139,20 @@ static unsigned int fast_classifier_post_routing(struct sk_buff *skb, bool is_v4
 	}
 	dev_put(dev);
 
-	if (!fast_classifier_find_dev_and_mac_addr(skb, &sic.dest_ip_xlate, &dest_dev_tmp, sic.dest_mac_xlate, is_v4)) {
+	/*
+	 * This is a hack to work-around the issue where dest_ip & dest_ip_xlate differs, i.e. reverse NAT, which
+	 * interferes with UDP port forwarding in DD-WRT.  Not sure why TCP is OK, since both UDP and TCP lookup
+	 * destination interface are the same.  For now, we fall back to the original behaviour of the destination
+	 * interface lookup if we detect that we're handling post-routed reverse NAT traffic.
+	 *
+	 * TODO: to improve the way destination interface is looked up.
+	 */
+	if (likely(sfe_addr_equal(&sic.dest_ip_xlate, &sic.dest_ip, is_v4)))
+		tmp_skb = skb;
+	else
+		tmp_skb = NULL;
+
+	if (!fast_classifier_find_dev_and_mac_addr(tmp_skb, &sic.dest_ip_xlate, &dest_dev_tmp, sic.dest_mac_xlate, is_v4)) {
 		fast_classifier_incr_exceptions(FAST_CL_EXCEPTION_NO_DEST_XLATE_DEV);
 		goto done1;
 	}
