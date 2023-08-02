@@ -577,14 +577,14 @@ static void fast_classifier_send_genl_msg(int msg, struct fast_classifier_tuple 
 		if (rc == 0) {
 			atomic_inc(&offloaded_msgs);
 		} else {
-			atomic_inc(&offloaded_fail_msgs);
+			atomic_inc(&offloaded_msgs);
 		}
 		break;
 	case FAST_CLASSIFIER_C_DONE:
 		if (rc == 0) {
 			atomic_inc(&done_msgs);
 		} else {
-			atomic_inc(&done_fail_msgs);
+			atomic_inc(&done_msgs);
 		}
 		break;
 	default:
