@@ -850,6 +850,25 @@ static unsigned int fast_classifier_post_routing(struct sk_buff *skb, bool is_v4
 		return NF_ACCEPT;
 	}
 
+#ifdef CONFIG_XFRM
+	/*
+	 * Packet to xfrm for encapsulation, we can't process it
+	 */
+	if (unlikely(skb_dst(skb)->xfrm)) {
+		DEBUG_TRACE("packet to xfrm, ignoring\n");
+		return NF_ACCEPT;
+	}
+#endif
+
+	/*
+	 * Don't process locally generated packets.
+	 */
+	if (skb->sk) {
+		fast_classifier_incr_exceptions(FAST_CL_EXCEPTION_LOCAL_OUT);
+		DEBUG_TRACE("skip local out packet\n");
+		return NF_ACCEPT;
+	}
+
 	/*
 	 * Don't process packets that are not being forwarded.
 	 */
@@ -1561,6 +1580,40 @@ static void fast_classifier_sync_rule(struct sfe_connection_sync *sis)
 		}
 		spin_unlock_bh(&ct->lock);
 		break;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0))
+	case IPPROTO_UDP:
+		{
+		unsigned int *timeouts;
+		/*
+		 * In Linux connection track, UDP flow has two timeout values:
+		 * /proc/sys/net/netfilter/nf_conntrack_udp_timeout:
+		 * 	this is for uni-direction UDP flow, normally its value is 60 seconds
+		 * /proc/sys/net/netfilter/nf_conntrack_udp_timeout_stream:
+		 * 	this is for bi-direction UDP flow, normally its value is 180 seconds
+		 *
+		 * Linux will update timer of UDP flow to stream timeout once it seen packets
+		 * in reply direction. But if flow is accelerated by NSS or SFE, Linux won't
+		 * see any packets. So we have to do the same thing in our stats sync message.
+		 */
+
+
+		if (!test_bit(IPS_ASSURED_BIT, &ct->status) && acct) {
+			if (atomic64_read(&SFE_ACCT_COUNTER(acct)[IP_CT_DIR_REPLY].packets)) {
+				set_bit(IPS_SEEN_REPLY_BIT, &ct->status);
+				set_bit(IPS_ASSURED_BIT, &ct->status);
+			}
+		}
+		timeouts = nf_ct_timeout_lookup(ct);
+		spin_lock_bh(&ct->lock);
+		if (test_bit(IPS_SEEN_REPLY_BIT, &ct->status)) {
+			ct->timeout = nfct_time_stamp + timeouts[UDP_CT_REPLIED];
+		} else {
+			ct->timeout = nfct_time_stamp + timeouts[UDP_CT_UNREPLIED];
+		}
+		spin_unlock_bh(&ct->lock);
+		}
+		break;
+#endif
 	}
 
 	/*
