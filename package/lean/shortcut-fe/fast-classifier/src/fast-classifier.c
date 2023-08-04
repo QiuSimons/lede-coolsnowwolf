@@ -174,6 +174,9 @@ static struct genl_family fast_classifier_gnl_family = {
 	.mcgrps = fast_classifier_genl_mcgrp,
 	.n_mcgrps = ARRAY_SIZE(fast_classifier_genl_mcgrp),
 #endif /*KERNEL_VERSION(4, 10, 0)*/
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+	.resv_start_op = FAST_CLASSIFIER_C_DONE + 1,
+#endif /*KERNEL_VERSION(6, 1, 0)*/
 };
 
 static atomic_t offload_msgs = ATOMIC_INIT(0);
@@ -1483,7 +1486,7 @@ static void fast_classifier_sync_rule(struct sfe_connection_sync *sis)
 		nlstats.tx_packets = 0;
 		nlstats.tx_bytes = 0;
 
-		if (sis->src_dev && IFF_EBRIDGE &&
+		if (sis->src_dev && sis->src_dev->priv_flags & IFF_EBRIDGE &&
 		    (sis->src_new_packet_count || sis->src_new_byte_count)) {
 			nlstats.rx_packets = sis->src_new_packet_count;
 			nlstats.rx_bytes = sis->src_new_byte_count;
@@ -1491,7 +1494,7 @@ static void fast_classifier_sync_rule(struct sfe_connection_sync *sis)
 			br_dev_update_stats(sis->src_dev, &nlstats);
 			spin_unlock_bh(&sfe_connections_lock);
 		}
-		if (sis->dest_dev && IFF_EBRIDGE &&
+		if (sis->dest_dev && sis->dest_dev->priv_flags & IFF_EBRIDGE &&
 		    (sis->dest_new_packet_count || sis->dest_new_byte_count)) {
 			nlstats.rx_packets = sis->dest_new_packet_count;
 			nlstats.rx_bytes = sis->dest_new_byte_count;
